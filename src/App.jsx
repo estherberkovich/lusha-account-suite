@@ -875,11 +875,13 @@ function HealthTab({ accounts, onOpenAccount }) {
   );
 }
 
-function HealthDetailPanel({ account, onClose, onDelete, onAddAction, existingActions }) {
+function HealthDetailPanel({ account, onClose, onDelete, onAddAction, existingActions, insightHistory, onSaveInsight, onDeleteInsight }) {
   const [insight, setInsight] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [actionAdded, setActionAdded] = useState(false);
+  const [showInsightHistory, setShowInsightHistory] = useState(false);
+  const [expandedInsightId, setExpandedInsightId] = useState(null);
   const score = computeHealthScore(account);
   const t = TIER_COLORS[scoreTier(score)];
 
@@ -897,11 +899,18 @@ Trend (oldest to newest): ${account.trend.join(", ")}`;
       const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "API error");
-      setInsight({ ...JSON.parse(data.text.replace(/```json|```/g, "").trim()), generatedAt: Date.now() });
+      const ts1 = Date.now();
+      const full = { ...JSON.parse(data.text.replace(/```json|```/g, "").trim()), generatedAt: ts1 };
+      setInsight(full);
+      onSaveInsight({ id: `insight-${ts1}`, timestamp: ts1, score, tier: t.label, ...full });
     } catch (e) {
       const fallback = FALLBACK_INSIGHTS[account.id];
-      if (fallback) setInsight({ ...fallback, isFallback: true, generatedAt: Date.now() });
-      else setError("Couldn't generate an insight right now.");
+      if (fallback) {
+        const ts2 = Date.now();
+        const full = { ...fallback, isFallback: true, generatedAt: ts2 };
+        setInsight(full);
+        onSaveInsight({ id: `insight-${ts2}`, timestamp: ts2, score, tier: t.label, ...full });
+      } else setError("Couldn't generate an insight right now.");
     } finally { setLoading(false); }
   }
 
@@ -964,6 +973,46 @@ Trend (oldest to newest): ${account.trend.join(", ")}`;
               </button>
             </div>
           )}
+
+          {(insightHistory || []).length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <button onClick={() => setShowInsightHistory(!showInsightHistory)} style={{
+                display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer",
+                color: MUTED, fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, padding: 0,
+              }}>
+                <ChevronDown size={12} style={{ transform: showInsightHistory ? "rotate(180deg)" : "none" }} />
+                {showInsightHistory ? "Hide history" : `View history (${insightHistory.length})`}
+              </button>
+              {showInsightHistory && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                  {insightHistory.slice().reverse().map((entry) => {
+                    const isExpanded = expandedInsightId === entry.id;
+                    return (
+                      <div key={entry.id} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, overflow: "hidden" }}>
+                        <div
+                          onClick={() => setExpandedInsightId(isExpanded ? null : entry.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", cursor: "pointer", background: isExpanded ? "#FAFAFB" : PANEL }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: MUTED }}>{formatDate(entry.timestamp)} · {entry.score}/100</div>
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); onDeleteInsight(entry.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: MUTED, flexShrink: 0 }}>
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                        {isExpanded && (
+                          <div style={{ padding: 10, borderTop: `1px solid ${BORDER}` }}>
+                            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#374151", lineHeight: 1.5, marginBottom: 8 }}>{entry.summary}</div>
+                            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: INK, fontWeight: 600 }}>{entry.recommendation}</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -974,12 +1023,14 @@ Trend (oldest to newest): ${account.trend.join(", ")}`;
 // EXPANSION TAB
 // ---------------------------------------------------------------------------
 
-function ExpansionTab({ account, healthScore, healthTier, allSignals, allStakeholders, onAddSignal, onAddStakeholder, onDeleteStakeholder, showAddSignalForm, setShowAddSignalForm, showAddStakeholderForm, setShowAddStakeholderForm, onAddAction, existingActions }) {
+function ExpansionTab({ account, healthScore, healthTier, allSignals, allStakeholders, onAddSignal, onAddStakeholder, onDeleteStakeholder, showAddSignalForm, setShowAddSignalForm, showAddStakeholderForm, setShowAddStakeholderForm, onAddAction, existingActions, briefHistory, onSaveBrief, onDeleteBrief }) {
   const [showGraphModal, setShowGraphModal] = useState(false);
   const [brief, setBrief] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [actionAdded, setActionAdded] = useState(false);
+  const [showBriefHistory, setShowBriefHistory] = useState(false);
+  const [expandedBriefId, setExpandedBriefId] = useState(null);
   const alertSignals = useMemo(() => allSignals.filter((s) => ALERT_SIGNAL_TYPES.includes(s.type)), [allSignals]);
   const tierMeta = TIER_COLORS[healthTier];
 
@@ -1029,11 +1080,18 @@ ${stakeholdersText}`;
         });
         parsedBrief.priorityStakeholders = Object.values(byName);
       }
-      setBrief({ ...parsedBrief, generatedAt: Date.now() });
+      const ts1 = Date.now();
+      const fullBrief = { ...parsedBrief, generatedAt: ts1 };
+      setBrief(fullBrief);
+      onSaveBrief({ id: `brief-${ts1}`, timestamp: ts1, healthScoreAtTime: healthScore, healthTierAtTime: tierMeta.label, ...fullBrief });
     } catch (e) {
       const fallback = FALLBACK_BRIEFS[account.id];
-      if (fallback) setBrief({ ...fallback, isFallback: true, generatedAt: Date.now() });
-      else setError("Couldn't generate the brief right now.");
+      if (fallback) {
+        const ts2 = Date.now();
+        const fullFallback = { ...fallback, isFallback: true, generatedAt: ts2 };
+        setBrief(fullFallback);
+        onSaveBrief({ id: `brief-${ts2}`, timestamp: ts2, healthScoreAtTime: healthScore, healthTierAtTime: tierMeta.label, ...fullFallback });
+      } else setError("Couldn't generate the brief right now.");
     } finally { setLoading(false); }
   }
 
@@ -1114,9 +1172,67 @@ ${stakeholdersText}`;
         </div>
       </div>
 
-      <button onClick={generateBrief} disabled={loading} style={{ display: "flex", alignItems: "center", gap: 8, background: VIOLET, color: "#FFFFFF", border: "none", borderRadius: 10, padding: "12px 20px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer", fontFamily: "'Inter', sans-serif", opacity: loading ? 0.75 : 1, marginBottom: 20 }}>
-        {loading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} {loading ? "Generating expansion brief…" : "Generate expansion brief"}
-      </button>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
+        <button onClick={generateBrief} disabled={loading} style={{ display: "flex", alignItems: "center", gap: 8, background: VIOLET, color: "#FFFFFF", border: "none", borderRadius: 10, padding: "12px 20px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer", fontFamily: "'Inter', sans-serif", opacity: loading ? 0.75 : 1 }}>
+          {loading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />} {loading ? "Generating expansion brief…" : "Generate expansion brief"}
+        </button>
+        {(briefHistory || []).length > 0 && (
+          <button onClick={() => setShowBriefHistory(!showBriefHistory)} style={{
+            display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px solid ${BORDER}`,
+            borderRadius: 10, padding: "10px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: MUTED, fontFamily: "'Inter', sans-serif",
+          }}>
+            {showBriefHistory ? "Hide history" : `View history (${briefHistory.length})`}
+          </button>
+        )}
+      </div>
+
+      {showBriefHistory && (briefHistory || []).length > 0 && (
+        <div style={{ background: "#FAFAFB", border: `1px solid ${BORDER}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, color: INK, marginBottom: 12, letterSpacing: 0.4, textTransform: "uppercase" }}>Past briefs</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {briefHistory.slice().reverse().map((entry) => {
+              const isExpanded = expandedBriefId === entry.id;
+              return (
+                <div key={entry.id} style={{ border: `1px solid ${BORDER}`, borderRadius: 10, overflow: "hidden" }}>
+                  <div
+                    onClick={() => setExpandedBriefId(isExpanded ? null : entry.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", cursor: "pointer", background: isExpanded ? "#F5F0FF" : PANEL }}
+                  >
+                    {entry.healthScoreAtTime != null && <ScoreRing score={entry.healthScoreAtTime} size={30} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: MUTED, marginBottom: 2 }}>{formatDate(entry.timestamp)} · {entry.healthTierAtTime}</div>
+                      <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#374151", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.opportunitySummary}</div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); onDeleteBrief(entry.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: MUTED, flexShrink: 0 }}>
+                      <Trash2 size={13} />
+                    </button>
+                    <ChevronDown size={14} color={MUTED} style={{ transform: isExpanded ? "rotate(180deg)" : "none", flexShrink: 0 }} />
+                  </div>
+                  {isExpanded && (
+                    <div style={{ padding: 16, borderTop: `1px solid ${BORDER}` }}>
+                      <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: INK, lineHeight: 1.6, marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${BORDER}` }}>{entry.opportunitySummary}</div>
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, color: MUTED, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>Priority stakeholders</div>
+                        {(entry.priorityStakeholders || []).map((p, i) => (
+                          <div key={i} style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: INK, marginBottom: 4 }}><span style={{ fontWeight: 700 }}>{p.name}</span> — {p.reason}</div>
+                        ))}
+                      </div>
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, color: MUTED, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>Deal angle</div>
+                        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#374151" }}>{entry.dealAngle}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, color: MUTED, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>Next best action</div>
+                        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#374151", fontWeight: 600 }}>{entry.nextBestAction}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {error && <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: RISK, marginBottom: 20 }}>{error}</div>}
 
@@ -2358,6 +2474,8 @@ const STORAGE_ACTIONS = "lusha-suite-action-log";
 const STORAGE_REPORT_HISTORY = "lusha-suite-report-history";
 const STORAGE_CALL_HISTORY = "lusha-suite-call-history";
 const STORAGE_QBR_HISTORY = "lusha-suite-qbr-history";
+const STORAGE_BRIEF_HISTORY = "lusha-suite-brief-history";
+const STORAGE_INSIGHT_HISTORY = "lusha-suite-insight-history";
 
 export default function LushaAccountSuite() {
   const [activeTab, setActiveTab] = useState("health");
@@ -2369,6 +2487,8 @@ export default function LushaAccountSuite() {
   const [actionLog, setActionLog] = useState({});
   const [callHistory, setCallHistory] = useState({});
   const [qbrHistory, setQbrHistory] = useState({});
+  const [briefHistory, setBriefHistory] = useState({});
+  const [insightHistory, setInsightHistory] = useState({});
   const [showAddAccountForm, setShowAddAccountForm] = useState(false);
   const [showAddSignalForm, setShowAddSignalForm] = useState(false);
   const [showAddStakeholderForm, setShowAddStakeholderForm] = useState(false);
@@ -2382,6 +2502,8 @@ export default function LushaAccountSuite() {
       try { const r = await window.storage.get(STORAGE_ACTIONS, false); if (r?.value) setActionLog(JSON.parse(r.value)); } catch (e) {}
       try { const r = await window.storage.get(STORAGE_CALL_HISTORY, false); if (r?.value) setCallHistory(JSON.parse(r.value)); } catch (e) {}
       try { const r = await window.storage.get(STORAGE_QBR_HISTORY, false); if (r?.value) setQbrHistory(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(STORAGE_BRIEF_HISTORY, false); if (r?.value) setBriefHistory(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(STORAGE_INSIGHT_HISTORY, false); if (r?.value) setInsightHistory(JSON.parse(r.value)); } catch (e) {}
     })();
   }, []);
 
@@ -2493,6 +2615,30 @@ export default function LushaAccountSuite() {
     const updated = { ...qbrHistory, [account.id]: (qbrHistory[account.id] || []).filter((q) => q.id !== id) };
     setQbrHistory(updated);
     try { await window.storage.set(STORAGE_QBR_HISTORY, JSON.stringify(updated), false); } catch (e) {}
+  }
+
+  async function handleSaveBrief(entry) {
+    const updated = { ...briefHistory, [account.id]: [...(briefHistory[account.id] || []), entry] };
+    setBriefHistory(updated);
+    try { await window.storage.set(STORAGE_BRIEF_HISTORY, JSON.stringify(updated), false); } catch (e) {}
+  }
+
+  async function handleDeleteBrief(id) {
+    const updated = { ...briefHistory, [account.id]: (briefHistory[account.id] || []).filter((b) => b.id !== id) };
+    setBriefHistory(updated);
+    try { await window.storage.set(STORAGE_BRIEF_HISTORY, JSON.stringify(updated), false); } catch (e) {}
+  }
+
+  async function handleSaveInsight(accId, entry) {
+    const updated = { ...insightHistory, [accId]: [...(insightHistory[accId] || []), entry] };
+    setInsightHistory(updated);
+    try { await window.storage.set(STORAGE_INSIGHT_HISTORY, JSON.stringify(updated), false); } catch (e) {}
+  }
+
+  async function handleDeleteInsight(accId, id) {
+    const updated = { ...insightHistory, [accId]: (insightHistory[accId] || []).filter((i) => i.id !== id) };
+    setInsightHistory(updated);
+    try { await window.storage.set(STORAGE_INSIGHT_HISTORY, JSON.stringify(updated), false); } catch (e) {}
   }
 
   return (
@@ -2611,6 +2757,9 @@ export default function LushaAccountSuite() {
             setShowAddStakeholderForm={setShowAddStakeholderForm}
             onAddAction={handleAddAction}
             existingActions={accountActions}
+            briefHistory={briefHistory[account.id] || []}
+            onSaveBrief={handleSaveBrief}
+            onDeleteBrief={handleDeleteBrief}
           />
         ) : activeTab === "calls" ? (
           <CallIntelligenceTab
@@ -2657,6 +2806,9 @@ export default function LushaAccountSuite() {
           onDelete={handleDeleteAccount}
           onAddAction={(text) => handleAddAction(text, openHealthAccount.id)}
           existingActions={actionLog[openHealthAccount.id] || []}
+          insightHistory={insightHistory[openHealthAccount.id] || []}
+          onSaveInsight={(entry) => handleSaveInsight(openHealthAccount.id, entry)}
+          onDeleteInsight={(id) => handleDeleteInsight(openHealthAccount.id, id)}
         />
       )}
     </div>
